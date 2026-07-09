@@ -265,16 +265,26 @@ export default function LernfortschrittTracker() {
 
   return (
     <div style={{ fontFamily: "'Iowan Old Style', 'Palatino Linotype', Georgia, serif", background: "#EDF1EA", minHeight: "100vh", color: "#1B1B18" }}>
-      <div style={{ maxWidth: 760, margin: "0 auto", padding: "28px 20px 60px" }}>
+      <style>{`
+        @media (max-width: 480px) {
+          .lp-outer { padding: 18px 12px 40px !important; }
+          .lp-header-card { padding: 12px 12px !important; }
+          .lp-h1 { font-size: 24px !important; }
+          .exam-row-main { flex-wrap: wrap !important; row-gap: 3px !important; }
+          .exam-meta { flex-basis: 100% !important; margin-left: 38px !important; margin-top: 1px !important; }
+          .progress-grid { grid-template-columns: repeat(2, 1fr) !important; }
+        }
+      `}</style>
+      <div className="lp-outer" style={{ maxWidth: 760, margin: "0 auto", padding: "28px 20px 60px" }}>
         <header style={{ marginBottom: 22 }}>
           <div style={{ fontSize: 12, letterSpacing: "0.14em", textTransform: "uppercase", color: "#6B6459", fontFamily: "ui-sans-serif, system-ui" }}>
             Klausurenphase · Juli–August 2026
           </div>
-          <h1 style={{ fontSize: 30, margin: "4px 0 14px", fontWeight: 600 }}>Lernfortschritt</h1>
+          <h1 className="lp-h1" style={{ fontSize: 30, margin: "4px 0 14px", fontWeight: 600 }}>Lernfortschritt</h1>
 
           <AuthBar cloud={cloud} />
 
-          <div style={{ background: "#fff", borderRadius: 14, padding: "16px 18px", boxShadow: "0 1px 2px rgba(27,27,24,0.08)", marginBottom: 14 }}>
+          <div className="lp-header-card" style={{ background: "#fff", borderRadius: 14, padding: "16px 18px", boxShadow: "0 1px 2px rgba(27,27,24,0.08)", marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#6B6459", fontFamily: "ui-sans-serif, system-ui", marginBottom: 12 }}>
               <CalendarDays size={15} /> <span style={{ fontWeight: 600, letterSpacing: "0.02em" }}>Klausuren-Übersicht</span>
               <button onClick={() => setOpenExamForm({ exam: null })} title="Klausur hinzufügen"
@@ -295,17 +305,19 @@ export default function LernfortschrittTracker() {
                       display: "flex", alignItems: "center", gap: 8, padding: "6px 6px 6px 10px", borderRadius: 8,
                       background: `${meta.color}0D`, borderLeft: `3px solid ${meta.color}`
                     }}>
-                      <div onClick={toggleDetail} title="Inhalt anzeigen" style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, cursor: "pointer" }}>
-                        <span style={{ fontSize: 12.5, fontWeight: 700, color: "#3A382F", minWidth: 46 }}>{shortDate(ex.dayId)}</span>
+                      <div className="exam-row-main" onClick={toggleDetail} title="Inhalt anzeigen" style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, cursor: "pointer" }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: "#3A382F", minWidth: 46, flexShrink: 0 }}>{shortDate(ex.dayId)}</span>
                         <Icon size={14} color={meta.color} style={{ flexShrink: 0 }} />
                         <span style={{ fontSize: 12.5, fontWeight: 600, color: meta.color, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta.label}</span>
                         {ex.content && <span title="Inhalt hinterlegt" style={{ width: 6, height: 6, borderRadius: 999, background: meta.color, display: "inline-block", flexShrink: 0 }} />}
-                        {ex.time && <span style={{ fontSize: 12, color: "#3A382F", whiteSpace: "nowrap" }}>{ex.time}</span>}
-                        {ex.room && (
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 12, color: "#6B6459", whiteSpace: "nowrap" }}>
-                            <MapPin size={12} /> {ex.room}
-                          </span>
-                        )}
+                        <span className="exam-meta" style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                          {ex.time && <span style={{ fontSize: 12, color: "#3A382F", whiteSpace: "nowrap" }}>{ex.time}</span>}
+                          {ex.room && (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 12, color: "#6B6459", whiteSpace: "nowrap" }}>
+                              <MapPin size={12} /> {ex.room}
+                            </span>
+                          )}
+                        </span>
                       </div>
                       <button onClick={toggleDetail} title="Inhalt anzeigen" style={iconBtnSm}>
                         <ChevronDown size={15} color="#948C7C" style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
@@ -348,7 +360,7 @@ export default function LernfortschrittTracker() {
             )}
           </div>
 
-          <div style={{ background: "#fff", borderRadius: 14, padding: "16px 18px", boxShadow: "0 1px 2px rgba(27,27,24,0.08)" }}>
+          <div className="lp-header-card" style={{ background: "#fff", borderRadius: 14, padding: "16px 18px", boxShadow: "0 1px 2px rgba(27,27,24,0.08)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontFamily: "ui-sans-serif, system-ui" }}>
               <span style={{ fontSize: 13, color: "#6B6459" }}>Gesamtfortschritt</span>
               <span style={{ fontSize: 13, fontWeight: 600 }}>{totalDone} / {tasks.length} Module ({pct}%)</span>
@@ -357,7 +369,7 @@ export default function LernfortschrittTracker() {
               <div style={{ height: "100%", width: `${pct}%`, background: "#2C6E63", transition: "width 0.3s" }} />
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 16 }}>
+            <div className="progress-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 16 }}>
               {Object.entries(SUBJECT_META).filter(([k, v]) => v.priority || subjectStats[k].total > 0).map(([key, meta]) => {
                 const s = subjectStats[key];
                 if (s.total === 0) return null;
