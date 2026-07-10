@@ -3,6 +3,12 @@ import { supabase, isSupabaseConfigured } from "./supabaseClient";
 
 const TABLE = "progress";
 
+// Feste Ziel-URL für den Magic-Link-Rücksprung. Ohne VITE_SITE_URL (z.B. lokal in der
+// Entwicklung) wird die aktuelle Origin verwendet. In Produktion sollte VITE_SITE_URL
+// immer auf die stabile Domain zeigen — sonst würde ein Login von einer alten,
+// eingefrorenen Vercel-Deployment-URL aus dorthin zurückführen.
+const SITE_URL = import.meta.env.VITE_SITE_URL || window.location.origin;
+
 // Hält den App-Zustand mit Supabase synchron, sobald man eingeloggt ist.
 // state: { loaded, checked, tasks, exams }
 // setters: { setChecked, setTasks, setExams }
@@ -86,7 +92,7 @@ export function useCloudSync(state, setters) {
     if (!isSupabaseConfigured) return { error: new Error("Sync ist nicht konfiguriert.") };
     return supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: SITE_URL },
     });
   }, []);
 
