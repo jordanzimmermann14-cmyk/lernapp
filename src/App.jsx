@@ -132,7 +132,7 @@ export default function LernfortschrittTracker() {
   const [checked, setChecked] = useState({});
   const [tasks, setTasks] = useState(ALL_TASKS);
   const [loaded, setLoaded] = useState(false);
-  const [filter, setFilter] = useState("ALLE");
+  const [openSubject, setOpenSubject] = useState(null); // Fach-Kürzel der aufgeklappten Themenliste
   const [openForm, setOpenForm] = useState(null); // { dayId, task } — task null = neu
   const [exams, setExams] = useState(SEED_EXAMS);
   const [openExamForm, setOpenExamForm] = useState(null); // { exam } — exam null = neu
@@ -216,6 +216,10 @@ export default function LernfortschrittTracker() {
   const tasksForDay = (dayId) =>
     tasks.filter((t) => t.dayId === dayId).sort((a, b) => a.block - b.block);
 
+  const tasksForSubject = (subj) =>
+    tasks.filter((t) => t.subject === subj)
+      .sort((a, b) => (DAY_INDEX[a.dayId] - DAY_INDEX[b.dayId]) || (a.block - b.block));
+
   const totalDone = tasks.filter((t) => checked[t.id]).length;
   const pct = tasks.length ? Math.round((totalDone / tasks.length) * 100) : 0;
 
@@ -260,8 +264,7 @@ export default function LernfortschrittTracker() {
     return { streak, state };
   }, [checked, tasks]);
 
-  const visibleDays = PLAN.filter((d) => filter === "ALLE" || examForDay(d.id)?.subject === filter ||
-    tasksForDay(d.id).some((t) => t.subject === filter));
+  const visibleDays = PLAN;
 
   return (
     <div style={{ fontFamily: "'Iowan Old Style', 'Palatino Linotype', Georgia, serif", background: "#EDF1EA", minHeight: "100vh", color: "#1B1B18" }}>
@@ -376,11 +379,11 @@ export default function LernfortschrittTracker() {
                 const Icon = meta.icon;
                 const spct = Math.round((s.done / s.total) * 100);
                 return (
-                  <button key={key} onClick={() => setFilter(filter === key ? "ALLE" : key)}
+                  <button key={key} onClick={() => setOpenSubject(openSubject === key ? null : key)}
                     style={{
                       display: "flex", flexDirection: "column", gap: 6, padding: "10px 10px", borderRadius: 10,
-                      border: filter === key ? `1.5px solid ${meta.color}` : "1px solid #E4E1D6",
-                      background: filter === key ? `${meta.color}14` : "#FAFAF6", cursor: "pointer", textAlign: "left",
+                      border: openSubject === key ? `1.5px solid ${meta.color}` : "1px solid #E4E1D6",
+                      background: openSubject === key ? `${meta.color}14` : "#FAFAF6", cursor: "pointer", textAlign: "left",
                       fontFamily: "ui-sans-serif, system-ui"
                     }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: meta.color }}>
@@ -392,14 +395,38 @@ export default function LernfortschrittTracker() {
                 );
               })}
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, minHeight: 20 }}>
-              <div>
-                {filter !== "ALLE" && (
-                  <button onClick={() => setFilter("ALLE")} style={{ fontSize: 12, color: "#6B6459", background: "none", border: "none", cursor: "pointer", fontFamily: "ui-sans-serif, system-ui", textDecoration: "underline", padding: 0 }}>
-                    Filter zurücksetzen
-                  </button>
-                )}
-              </div>
+            {openSubject && (() => {
+              const meta = SUBJECT_META[openSubject];
+              const Icon = meta.icon;
+              const list = tasksForSubject(openSubject);
+              const s = subjectStats[openSubject];
+              return (
+                <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 10, background: `${meta.color}0A`, border: `1px solid ${meta.color}33`, fontFamily: "ui-sans-serif, system-ui" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    <Icon size={15} color={meta.color} style={{ flexShrink: 0 }} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: meta.color, flex: 1, minWidth: 0 }}>{meta.label}</span>
+                    <span style={{ fontSize: 12, color: "#6B6459", whiteSpace: "nowrap" }}>{s.done}/{s.total} erledigt</span>
+                    <button onClick={() => setOpenSubject(null)} title="Schließen" style={iconBtnSm}><X size={14} color="#6B6459" /></button>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    {list.map((t) => {
+                      const isChecked = !!checked[t.id];
+                      return (
+                        <div key={t.id} onClick={() => toggle(t.id)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 4px", borderRadius: 7, cursor: "pointer" }}>
+                          {isChecked
+                            ? <CheckCircle2 size={17} color={meta.color} style={{ flexShrink: 0 }} />
+                            : <Circle size={17} color="#D5D0C3" style={{ flexShrink: 0 }} />}
+                          <span style={{ fontSize: 13.5, flex: 1, minWidth: 0, color: isChecked ? "#B7B2A3" : "#2A2A25", textDecoration: isChecked ? "line-through" : "none" }}>{t.text}</span>
+                          <span style={{ fontSize: 11, color: "#B7B2A3", whiteSpace: "nowrap", flexShrink: 0 }}>{shortDate(t.dayId)}</span>
+                        </div>
+                      );
+                    })}
+                    {list.length === 0 && <div style={{ fontSize: 12.5, color: "#948C7C", padding: "4px 2px" }}>Keine Themen in diesem Fach.</div>}
+                  </div>
+                </div>
+              );
+            })()}
+            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: 12, minHeight: 20 }}>
               {(() => {
                 const { streak, state } = streakInfo;
                 const w = Math.min(streak, 7) / 7;
