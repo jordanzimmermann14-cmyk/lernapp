@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Circle, Flame, Rotate3d, Truck, Calculator, TrainFront, Boxes, Code2, MapPin, CalendarDays, Plus, Pencil, Trash2, X, Check, ChevronDown, Cloud, CloudOff, LogOut } from "lucide-react";
 import { useCloudSync } from "./cloudSync";
 
@@ -133,6 +133,8 @@ export default function LernfortschrittTracker() {
   const [tasks, setTasks] = useState(ALL_TASKS);
   const [loaded, setLoaded] = useState(false);
   const [openSubject, setOpenSubject] = useState(null); // Fach-Kürzel der aufgeklappten Themenliste
+  const [subjectEditTask, setSubjectEditTask] = useState(null); // Thema, das in der Fachliste bearbeitet wird
+  const [showPast, setShowPast] = useState(false); // vergangene Tage einblenden
   const [openForm, setOpenForm] = useState(null); // { dayId, task } — task null = neu
   const [exams, setExams] = useState(SEED_EXAMS);
   const [openExamForm, setOpenExamForm] = useState(null); // { exam } — exam null = neu
@@ -264,7 +266,12 @@ export default function LernfortschrittTracker() {
     return { streak, state };
   }, [checked, tasks]);
 
-  const visibleDays = PLAN;
+  const today0 = startOfToday();
+  const matchesSubject = (d) => !openSubject || examForDay(d.id)?.subject === openSubject ||
+    tasksForDay(d.id).some((t) => t.subject === openSubject);
+  const isPast = (d) => { const dt = DAY_DATEOBJ[d.id]; return dt && dt.getTime() < today0.getTime(); };
+  const pastCount = PLAN.filter((d) => isPast(d) && matchesSubject(d)).length;
+  const visibleDays = PLAN.filter((d) => matchesSubject(d) && (showPast || !isPast(d)));
 
   return (
     <div style={{ fontFamily: "'Iowan Old Style', 'Palatino Linotype', Georgia, serif", background: "#EDF1EA", minHeight: "100vh", color: "#1B1B18" }}>
@@ -412,13 +419,25 @@ export default function LernfortschrittTracker() {
                     {list.map((t) => {
                       const isChecked = !!checked[t.id];
                       return (
-                        <div key={t.id} onClick={() => toggle(t.id)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 4px", borderRadius: 7, cursor: "pointer" }}>
-                          {isChecked
-                            ? <CheckCircle2 size={17} color={meta.color} style={{ flexShrink: 0 }} />
-                            : <Circle size={17} color="#D5D0C3" style={{ flexShrink: 0 }} />}
-                          <span style={{ fontSize: 13.5, flex: 1, minWidth: 0, color: isChecked ? "#B7B2A3" : "#2A2A25", textDecoration: isChecked ? "line-through" : "none" }}>{t.text}</span>
-                          <span style={{ fontSize: 11, color: "#B7B2A3", whiteSpace: "nowrap", flexShrink: 0 }}>{shortDate(t.dayId)}</span>
-                        </div>
+                        <Fragment key={t.id}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <div onClick={() => toggle(t.id)} style={{ display: "flex", alignItems: "center", gap: 9, flex: 1, minWidth: 0, padding: "6px 4px", borderRadius: 7, cursor: "pointer" }}>
+                              {isChecked
+                                ? <CheckCircle2 size={17} color={meta.color} style={{ flexShrink: 0 }} />
+                                : <Circle size={17} color="#D5D0C3" style={{ flexShrink: 0 }} />}
+                              <span style={{ fontSize: 13.5, flex: 1, minWidth: 0, color: isChecked ? "#B7B2A3" : "#2A2A25", textDecoration: isChecked ? "line-through" : "none" }}>{t.text}</span>
+                              <span style={{ fontSize: 11, color: "#B7B2A3", whiteSpace: "nowrap", flexShrink: 0 }}>{shortDate(t.dayId)}</span>
+                            </div>
+                            <button onClick={() => setSubjectEditTask(subjectEditTask?.id === t.id ? null : t)} title="Bearbeiten" style={iconBtnSm}><Pencil size={13} color="#6B6459" /></button>
+                          </div>
+                          {subjectEditTask?.id === t.id && (
+                            <TaskForm
+                              initial={subjectEditTask}
+                              onCancel={() => setSubjectEditTask(null)}
+                              onSave={(data) => { saveTask(t.dayId, t.id, data); setSubjectEditTask(null); }}
+                            />
+                          )}
+                        </Fragment>
                       );
                     })}
                     {list.length === 0 && <div style={{ fontSize: 12.5, color: "#948C7C", padding: "4px 2px" }}>Keine Themen in diesem Fach.</div>}
@@ -450,6 +469,18 @@ export default function LernfortschrittTracker() {
         </header>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {(pastCount > 0 || showPast) && (
+            <button onClick={() => setShowPast(!showPast)}
+              style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#6B6459", background: "none", border: "1px solid #D5D0C3", borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontFamily: "ui-sans-serif, system-ui" }}>
+              <ChevronDown size={14} style={{ transform: showPast ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+              {showPast ? "Vergangene Tage ausblenden" : `Vergangene Tage anzeigen${pastCount ? ` (${pastCount})` : ""}`}
+            </button>
+          )}
+          {visibleDays.length === 0 && (
+            <div style={{ background: "#fff", borderRadius: 12, padding: "18px 16px", textAlign: "center", fontSize: 13, color: "#948C7C", fontFamily: "ui-sans-serif, system-ui", boxShadow: "0 1px 2px rgba(27,27,24,0.06)" }}>
+              {openSubject ? "Keine kommenden Tage für dieses Fach." : "Keine kommenden Tage — die Klausurenphase ist vorbei."}
+            </div>
+          )}
           {visibleDays.map((day) => {
             const exam = examForDay(day.id);
             const examMeta = exam ? SUBJECT_META[exam.subject] : null;
