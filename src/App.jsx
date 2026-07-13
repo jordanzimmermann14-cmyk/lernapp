@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Circle, Flame, Rotate3d, Truck, Calculator, TrainFront, Boxes, Code2, MapPin, CalendarDays, Plus, Pencil, Trash2, X, Check, ChevronDown, Cloud, CloudOff, LogOut } from "lucide-react";
 import { useCloudSync } from "./cloudSync";
 
@@ -109,6 +109,12 @@ const STORAGE_KEY = "lernplan-checked-tasks";
 const CUSTOM_KEY = "lernplan-custom-tasks";
 const TASKS_KEY = "lernplan-tasks";
 const EXAMS_KEY = "lernplan-exams";
+const TOPICS_KEY = "lernplan-topics";
+const TOPIC_CHECKED_KEY = "lernplan-topic-checked";
+
+// Eigenständige Lernthemen pro Fach — unabhängig von den Tages-Modulen.
+// Einmalig aus den bestehenden Modulen befüllt, ab dann komplett getrennt verwaltet.
+const SEED_TOPICS = ALL_TASKS.map((t) => ({ id: `topic-${t.id}`, subject: t.subject, text: t.text }));
 
 // Minuten hübsch als "2h", "1h 30m" oder "45m"
 function formatMinutes(min) {
@@ -133,12 +139,14 @@ export default function LernfortschrittTracker() {
   const [tasks, setTasks] = useState(ALL_TASKS);
   const [loaded, setLoaded] = useState(false);
   const [openSubject, setOpenSubject] = useState(null); // Fach-Kürzel der aufgeklappten Themenliste
-  const [subjectEditTask, setSubjectEditTask] = useState(null); // Thema, das in der Fachliste bearbeitet wird
   const [showPast, setShowPast] = useState(false); // vergangene Tage einblenden
   const [openForm, setOpenForm] = useState(null); // { dayId, task } — task null = neu
   const [exams, setExams] = useState(SEED_EXAMS);
   const [openExamForm, setOpenExamForm] = useState(null); // { exam } — exam null = neu
   const [openExamDetail, setOpenExamDetail] = useState(null); // exam-id der aufgeklappten Inhalts-Übersicht
+  const [topics, setTopics] = useState(SEED_TOPICS);
+  const [topicChecked, setTopicChecked] = useState({});
+  const [openTopicForm, setOpenTopicForm] = useState(null); // { topic } — topic null = neu
 
   useEffect(() => {
     try {
@@ -156,6 +164,23 @@ export default function LernfortschrittTracker() {
 
       const savedExams = localStorage.getItem(EXAMS_KEY);
       if (savedExams) setExams(JSON.parse(savedExams));
+
+      const savedTopics = localStorage.getItem(TOPICS_KEY);
+      if (savedTopics) setTopics(JSON.parse(savedTopics));
+
+      const savedTopicChecked = localStorage.getItem(TOPIC_CHECKED_KEY);
+      if (savedTopicChecked) {
+        setTopicChecked(JSON.parse(savedTopicChecked));
+      } else if (saved) {
+        // Erstmigration: bisherigen Modul-Fortschritt als Startpunkt der eigenständigen
+        // Themen-Häkchen übernehmen (ab dann komplett getrennt voneinander).
+        const oldChecked = JSON.parse(saved);
+        const migrated = {};
+        Object.keys(oldChecked).forEach((taskId) => {
+          if (oldChecked[taskId]) migrated[`topic-${taskId}`] = true;
+        });
+        setTopicChecked(migrated);
+      }
     } catch (e) {
       // no saved progress yet
     } finally {
@@ -178,6 +203,16 @@ export default function LernfortschrittTracker() {
     try { localStorage.setItem(EXAMS_KEY, JSON.stringify(exams)); } catch (e) { /* storage unavailable */ }
   }, [exams, loaded]);
 
+  useEffect(() => {
+    if (!loaded) return;
+    try { localStorage.setItem(TOPICS_KEY, JSON.stringify(topics)); } catch (e) { /* storage unavailable */ }
+  }, [topics, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    try { localStorage.setItem(TOPIC_CHECKED_KEY, JSON.stringify(topicChecked)); } catch (e) { /* storage unavailable */ }
+  }, [topicChecked, loaded]);
+
   const saveExam = (existingId, data) => {
     setExams((prev) => existingId
       ? prev.map((e) => (e.id === existingId ? { ...e, ...data } : e))
@@ -189,7 +224,10 @@ export default function LernfortschrittTracker() {
   const sortedExams = [...exams].sort((a, b) => (DAY_INDEX[a.dayId] ?? 999) - (DAY_INDEX[b.dayId] ?? 999));
 
   // Geräteübergreifende Synchronisierung (Supabase, E-Mail Magic-Link)
-  const cloud = useCloudSync({ loaded, checked, tasks, exams }, { setChecked, setTasks, setExams });
+  const cloud = useCloudSync(
+    { loaded, checked, tasks, exams, topics, topicChecked },
+    { setChecked, setTasks, setExams, setTopics, setTopicChecked }
+  );
 
   const toggle = (id) => setChecked((c) => ({ ...c, [id]: !c[id] }));
 
@@ -218,23 +256,39 @@ export default function LernfortschrittTracker() {
   const tasksForDay = (dayId) =>
     tasks.filter((t) => t.dayId === dayId).sort((a, b) => a.block - b.block);
 
-  const tasksForSubject = (subj) =>
-    tasks.filter((t) => t.subject === subj)
-      .sort((a, b) => (DAY_INDEX[a.dayId] - DAY_INDEX[b.dayId]) || (a.block - b.block));
+  // Eigenständige Lernthemen: völlig unabhängig von den Tages-Modulen.
+  const toggleTopic = (id) => setTopicChecked((c) => ({ ...c, [id]: !c[id] }));
 
-  const totalDone = tasks.filter((t) => checked[t.id]).length;
-  const pct = tasks.length ? Math.round((totalDone / tasks.length) * 100) : 0;
+  const saveTopic = (existingId, data) => {
+    setTopics((prev) => existingId
+      ? prev.map((t) => (t.id === existingId ? { ...t, ...data } : t))
+      : [...prev, { id: `topic-custom-${Date.now()}`, ...data }]);
+    setOpenTopicForm(null);
+  };
 
-  const subjectStats = useMemo(() => {
+  const deleteTopic = (id) => {
+    setTopics((prev) => prev.filter((t) => t.id !== id));
+    setTopicChecked((c) => {
+      const { [id]: _, ...rest } = c;
+      return rest;
+    });
+  };
+
+  const topicsForSubject = (subj) => topics.filter((t) => t.subject === subj);
+
+  const totalDone = topics.filter((t) => topicChecked[t.id]).length;
+  const pct = topics.length ? Math.round((totalDone / topics.length) * 100) : 0;
+
+  const topicStats = useMemo(() => {
     const stats = {};
     Object.keys(SUBJECT_META).forEach((s) => (stats[s] = { done: 0, total: 0 }));
-    tasks.forEach((t) => {
+    topics.forEach((t) => {
       if (!stats[t.subject]) return;
       stats[t.subject].total += 1;
-      if (checked[t.id]) stats[t.subject].done += 1;
+      if (topicChecked[t.id]) stats[t.subject].done += 1;
     });
     return stats;
-  }, [checked, tasks]);
+  }, [topicChecked, topics]);
 
   // Streak: aufeinanderfolgende Tage (bis heute) mit ALLEN Aufgaben abgehakt.
   // Ein unvollständiger vergangener Tag friert die Streak ein; der heutige Tag
@@ -380,8 +434,8 @@ export default function LernfortschrittTracker() {
             </div>
 
             <div className="progress-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 16 }}>
-              {Object.entries(SUBJECT_META).filter(([k, v]) => v.priority || subjectStats[k].total > 0).map(([key, meta]) => {
-                const s = subjectStats[key];
+              {Object.entries(SUBJECT_META).filter(([k, v]) => v.priority || topicStats[k].total > 0).map(([key, meta]) => {
+                const s = topicStats[key];
                 if (s.total === 0) return null;
                 const Icon = meta.icon;
                 const spct = Math.round((s.done / s.total) * 100);
@@ -405,8 +459,8 @@ export default function LernfortschrittTracker() {
             {openSubject && (() => {
               const meta = SUBJECT_META[openSubject];
               const Icon = meta.icon;
-              const list = tasksForSubject(openSubject);
-              const s = subjectStats[openSubject];
+              const list = topicsForSubject(openSubject);
+              const s = topicStats[openSubject];
               return (
                 <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 10, background: `${meta.color}0A`, border: `1px solid ${meta.color}33`, fontFamily: "ui-sans-serif, system-ui" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -417,31 +471,48 @@ export default function LernfortschrittTracker() {
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                     {list.map((t) => {
-                      const isChecked = !!checked[t.id];
+                      const isChecked = !!topicChecked[t.id];
+                      const isEditing = openTopicForm?.topic?.id === t.id;
                       return (
-                        <Fragment key={t.id}>
+                        <div key={t.id}>
                           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <div onClick={() => toggle(t.id)} style={{ display: "flex", alignItems: "center", gap: 9, flex: 1, minWidth: 0, padding: "6px 4px", borderRadius: 7, cursor: "pointer" }}>
+                            <div onClick={() => toggleTopic(t.id)} style={{ display: "flex", alignItems: "center", gap: 9, flex: 1, minWidth: 0, padding: "6px 4px", borderRadius: 7, cursor: "pointer" }}>
                               {isChecked
                                 ? <CheckCircle2 size={17} color={meta.color} style={{ flexShrink: 0 }} />
                                 : <Circle size={17} color="#D5D0C3" style={{ flexShrink: 0 }} />}
                               <span style={{ fontSize: 13.5, flex: 1, minWidth: 0, color: isChecked ? "#B7B2A3" : "#2A2A25", textDecoration: isChecked ? "line-through" : "none" }}>{t.text}</span>
-                              <span style={{ fontSize: 11, color: "#B7B2A3", whiteSpace: "nowrap", flexShrink: 0 }}>{shortDate(t.dayId)}</span>
                             </div>
-                            <button onClick={() => setSubjectEditTask(subjectEditTask?.id === t.id ? null : t)} title="Bearbeiten" style={iconBtnSm}><Pencil size={13} color="#6B6459" /></button>
+                            <button onClick={() => setOpenTopicForm(isEditing ? null : { topic: t })} title="Bearbeiten" style={iconBtnSm}><Pencil size={13} color="#6B6459" /></button>
+                            <button onClick={() => deleteTopic(t.id)} title="Löschen" style={iconBtnSm}><Trash2 size={13} color="#B5442E" /></button>
                           </div>
-                          {subjectEditTask?.id === t.id && (
-                            <TaskForm
-                              initial={subjectEditTask}
-                              onCancel={() => setSubjectEditTask(null)}
-                              onSave={(data) => { saveTask(t.dayId, t.id, data); setSubjectEditTask(null); }}
+                          {isEditing && (
+                            <TopicForm
+                              initial={t}
+                              onCancel={() => setOpenTopicForm(null)}
+                              onSave={(data) => saveTopic(t.id, data)}
                             />
                           )}
-                        </Fragment>
+                        </div>
                       );
                     })}
                     {list.length === 0 && <div style={{ fontSize: 12.5, color: "#948C7C", padding: "4px 2px" }}>Keine Themen in diesem Fach.</div>}
                   </div>
+                  {openTopicForm && !openTopicForm.topic ? (
+                    <TopicForm
+                      initial={{ subject: openSubject }}
+                      onCancel={() => setOpenTopicForm(null)}
+                      onSave={(data) => saveTopic(null, data)}
+                    />
+                  ) : (
+                    <button onClick={() => setOpenTopicForm({ topic: null })}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6, marginTop: 6, padding: "6px 8px",
+                        fontSize: 12.5, color: "#6B6459", background: "none", border: "1px dashed #D5D0C3",
+                        borderRadius: 8, cursor: "pointer", fontFamily: "ui-sans-serif, system-ui", width: "100%"
+                      }}>
+                      <Plus size={14} /> Thema hinzufügen
+                    </button>
+                  )}
                 </div>
               );
             })()}
@@ -699,6 +770,47 @@ function ExamForm({ initial, onSave, onCancel }) {
         </button>
         <button onClick={submit} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "#fff", background: "#2C6E63", border: "none", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontFamily: "ui-sans-serif, system-ui", fontWeight: 600 }}>
           <Check size={14} /> {initial ? "Speichern" : "Hinzufügen"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TopicForm({ initial, onSave, onCancel }) {
+  const [subject, setSubject] = useState(initial?.subject || "RW");
+  const [text, setText] = useState(initial?.text || "");
+  const isEdit = !!initial?.id;
+
+  const submit = () => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    onSave({ subject, text: trimmed });
+  };
+
+  return (
+    <div style={{
+      marginTop: 8, padding: 12, borderRadius: 10, background: "#FAFAF6", border: "1px solid #E4E1D6",
+      display: "flex", flexDirection: "column", gap: 8, fontFamily: "ui-sans-serif, system-ui"
+    }}>
+      <select value={subject} onChange={(e) => setSubject(e.target.value)} style={selectStyle}>
+        {Object.entries(SUBJECT_META).map(([key, meta]) => (
+          <option key={key} value={key}>{meta.label}</option>
+        ))}
+      </select>
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") onCancel(); }}
+        placeholder="Thema (z.B. Grundlagen)"
+        autoFocus
+        style={{ fontSize: 13.5, padding: "8px 10px", borderRadius: 8, border: "1px solid #D5D0C3", fontFamily: "ui-sans-serif, system-ui", outline: "none" }}
+      />
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button onClick={onCancel} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "#6B6459", background: "none", border: "1px solid #D5D0C3", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontFamily: "ui-sans-serif, system-ui" }}>
+          <X size={14} /> Abbrechen
+        </button>
+        <button onClick={submit} disabled={!text.trim()} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "#fff", background: text.trim() ? "#2C6E63" : "#A9B8B2", border: "none", borderRadius: 8, padding: "6px 12px", cursor: text.trim() ? "pointer" : "default", fontFamily: "ui-sans-serif, system-ui", fontWeight: 600 }}>
+          <Check size={14} /> {isEdit ? "Speichern" : "Hinzufügen"}
         </button>
       </div>
     </div>
