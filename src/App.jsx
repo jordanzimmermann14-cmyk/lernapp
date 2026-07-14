@@ -95,9 +95,6 @@ function taskDuration(t) {
 const ALL_TASKS = flattenTasks();
 const EXAM_DAYS = PLAN.filter((d) => d.exam).map((d) => ({ dayId: d.id, date: d.date, ...d.exam }));
 const SEED_EXAMS = EXAM_DAYS.map((ex) => ({ id: `exam-${ex.dayId}`, dayId: ex.dayId, subject: ex.s, time: ex.time, room: ex.room || "" }));
-const DAY_INDEX = Object.fromEntries(PLAN.map((d, i) => [d.id, i]));
-const DAY_DATE = Object.fromEntries(PLAN.map((d) => [d.id, d.date]));
-const shortDate = (dayId) => (DAY_DATE[dayId] || "").replace(/^\S+\s/, "");
 
 const PLAN_YEAR = 2026;
 const DAY_DATEOBJ = Object.fromEntries(PLAN.map((d) => {
@@ -105,10 +102,29 @@ const DAY_DATEOBJ = Object.fromEntries(PLAN.map((d) => {
   return [d.id, m ? new Date(PLAN_YEAR, parseInt(m[2], 10) - 1, parseInt(m[1], 10)) : null];
 }));
 const startOfToday = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); };
+
+// Eigene, frei hinzufügbare Tage (für künftige Klausurphasen) — Datum als "YYYY-MM-DD".
+const WEEKDAYS_DE = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+function isoToDateObj(iso) {
+  const [y, m, d] = iso.split("-").map((n) => parseInt(n, 10));
+  return new Date(y, m - 1, d);
+}
+function formatCustomDayDate(iso) {
+  const dt = isoToDateObj(iso);
+  const dd = String(dt.getDate()).padStart(2, "0");
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  return `${WEEKDAYS_DE[dt.getDay()]} ${dd}.${mm}.${dt.getFullYear()}`;
+}
+function todayISO() {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+}
+
 const STORAGE_KEY = "lernplan-checked-tasks";
 const CUSTOM_KEY = "lernplan-custom-tasks";
 const TASKS_KEY = "lernplan-tasks";
 const EXAMS_KEY = "lernplan-exams";
+const CUSTOM_DAYS_KEY = "lernplan-custom-days";
 const TOPICS_KEY = "lernplan-topics";
 const TOPIC_CHECKED_KEY = "lernplan-topic-checked";
 
@@ -147,6 +163,8 @@ export default function LernfortschrittTracker() {
   const [topics, setTopics] = useState(SEED_TOPICS);
   const [topicChecked, setTopicChecked] = useState({});
   const [openTopicForm, setOpenTopicForm] = useState(null); // { topic } — topic null = neu
+  const [customDays, setCustomDays] = useState([]); // { id, iso, phase } — frei hinzugefügte Tage
+  const [openNewDayForm, setOpenNewDayForm] = useState(false);
 
   useEffect(() => {
     try {
@@ -181,6 +199,9 @@ export default function LernfortschrittTracker() {
         });
         setTopicChecked(migrated);
       }
+
+      const savedCustomDays = localStorage.getItem(CUSTOM_DAYS_KEY);
+      if (savedCustomDays) setCustomDays(JSON.parse(savedCustomDays));
     } catch (e) {
       // no saved progress yet
     } finally {
@@ -213,6 +234,23 @@ export default function LernfortschrittTracker() {
     try { localStorage.setItem(TOPIC_CHECKED_KEY, JSON.stringify(topicChecked)); } catch (e) { /* storage unavailable */ }
   }, [topicChecked, loaded]);
 
+  useEffect(() => {
+    if (!loaded) return;
+    try { localStorage.setItem(CUSTOM_DAYS_KEY, JSON.stringify(customDays)); } catch (e) { /* storage unavailable */ }
+  }, [customDays, loaded]);
+
+  const addCustomDay = (iso, phase) => {
+    const id = `day-${Date.now()}`;
+    setCustomDays((prev) => [...prev, { id, iso, phase: phase.trim() }]);
+    setOpenNewDayForm(false);
+  };
+
+  const deleteCustomDay = (id) => {
+    setCustomDays((prev) => prev.filter((d) => d.id !== id));
+    setTasks((prev) => prev.filter((t) => t.dayId !== id));
+    setExams((prev) => prev.filter((e) => e.dayId !== id));
+  };
+
   const saveExam = (existingId, data) => {
     setExams((prev) => existingId
       ? prev.map((e) => (e.id === existingId ? { ...e, ...data } : e))
@@ -221,12 +259,28 @@ export default function LernfortschrittTracker() {
   };
   const deleteExam = (id) => setExams((prev) => prev.filter((e) => e.id !== id));
   const examForDay = (dayId) => exams.find((e) => e.dayId === dayId);
-  const sortedExams = [...exams].sort((a, b) => (DAY_INDEX[a.dayId] ?? 999) - (DAY_INDEX[b.dayId] ?? 999));
 
-  // Geräteübergreifende Synchronisierung (Supabase, E-Mail Magic-Link)
+  // Alle Tage (fester Plan + eigene, unbegrenzt in die Zukunft hinzufügbare Tage),
+  // chronologisch zusammengeführt. Ein "Tag" ist hier bewusst minimal: nur was zur
+  // Anzeige/Sortierung nötig ist — Module/Klausuren werden weiterhin separat über
+  // die dayId nachgeschlagen (tasksForDay / examForDay).
+  const allDays = useMemo(() => {
+    const planDays = PLAN.map((d) => ({ id: d.id, date: d.date, phase: d.phase, dateObj: DAY_DATEOBJ[d.id], custom: false }));
+    const extraDays = customDays.map((d) => ({ id: d.id, date: formatCustomDayDate(d.iso), phase: d.phase, dateObj: isoToDateObj(d.iso), custom: true }));
+    return [...planDays, ...extraDays].sort((a, b) => (a.dateObj?.getTime() ?? 0) - (b.dateObj?.getTime() ?? 0));
+  }, [customDays]);
+
+  const dayIndex = useMemo(() => Object.fromEntries(allDays.map((d, i) => [d.id, i])), [allDays]);
+  const dayDateObj = useMemo(() => Object.fromEntries(allDays.map((d) => [d.id, d.dateObj])), [allDays]);
+  const dayDateLabel = useMemo(() => Object.fromEntries(allDays.map((d) => [d.id, d.date])), [allDays]);
+  const shortDate = (dayId) => (dayDateLabel[dayId] || "").replace(/^\S+\s/, "");
+
+  const sortedExams = [...exams].sort((a, b) => (dayIndex[a.dayId] ?? 999) - (dayIndex[b.dayId] ?? 999));
+
+  // Geräteübergreifende Synchronisierung (Supabase, ganz ohne Login)
   const cloud = useCloudSync(
-    { loaded, checked, tasks, exams, topics, topicChecked },
-    { setChecked, setTasks, setExams, setTopics, setTopicChecked }
+    { loaded, checked, tasks, exams, topics, topicChecked, customDays },
+    { setChecked, setTasks, setExams, setTopics, setTopicChecked, setCustomDays }
   );
 
   const toggle = (id) => setChecked((c) => ({ ...c, [id]: !c[id] }));
@@ -295,12 +349,12 @@ export default function LernfortschrittTracker() {
   // gilt als "in Arbeit" und friert nicht ein, solange er noch nicht komplett ist.
   const streakInfo = useMemo(() => {
     const today0 = startOfToday();
-    const dayList = PLAN.filter((d) => tasks.some((t) => t.dayId === d.id));
+    const dayList = allDays.filter((d) => tasks.some((t) => t.dayId === d.id));
     const complete = dayList.map((d) => {
       const dts = tasks.filter((t) => t.dayId === d.id);
       return dts.length > 0 && dts.every((t) => checked[t.id]);
     });
-    const dueTime = (i) => (DAY_DATEOBJ[dayList[i].id] ? DAY_DATEOBJ[dayList[i].id].getTime() : Infinity);
+    const dueTime = (i) => (dayList[i].dateObj ? dayList[i].dateObj.getTime() : Infinity);
 
     // letzter fälliger Tag (Datum <= heute)
     let lastDueIdx = -1;
@@ -318,14 +372,14 @@ export default function LernfortschrittTracker() {
     for (let i = start; i >= 0 && complete[i]; i--) streak++;
     const state = anchorComplete ? "warm" : streak > 0 ? "frozen" : "idle";
     return { streak, state };
-  }, [checked, tasks]);
+  }, [checked, tasks, allDays]);
 
   const today0 = startOfToday();
   const matchesSubject = (d) => !openSubject || examForDay(d.id)?.subject === openSubject ||
     tasksForDay(d.id).some((t) => t.subject === openSubject);
-  const isPast = (d) => { const dt = DAY_DATEOBJ[d.id]; return dt && dt.getTime() < today0.getTime(); };
-  const pastCount = PLAN.filter((d) => isPast(d) && matchesSubject(d)).length;
-  const visibleDays = PLAN.filter((d) => matchesSubject(d) && (showPast || !isPast(d)));
+  const isPast = (d) => d.dateObj && d.dateObj.getTime() < today0.getTime();
+  const pastCount = allDays.filter((d) => isPast(d) && matchesSubject(d)).length;
+  const visibleDays = allDays.filter((d) => matchesSubject(d) && (showPast || !isPast(d)));
 
   return (
     <div style={{ fontFamily: "'Iowan Old Style', 'Palatino Linotype', Georgia, serif", background: "#EDF1EA", minHeight: "100vh", color: "#1B1B18" }}>
@@ -341,10 +395,7 @@ export default function LernfortschrittTracker() {
       `}</style>
       <div className="lp-outer" style={{ maxWidth: 760, margin: "0 auto", padding: "28px 20px 60px" }}>
         <header style={{ marginBottom: 22 }}>
-          <div style={{ fontSize: 12, letterSpacing: "0.14em", textTransform: "uppercase", color: "#6B6459", fontFamily: "ui-sans-serif, system-ui" }}>
-            Klausurenphase · Juli–August 2026
-          </div>
-          <h1 className="lp-h1" style={{ fontSize: 30, margin: "4px 0 14px", fontWeight: 600 }}>Lernfortschritt</h1>
+          <h1 className="lp-h1" style={{ fontSize: 30, margin: "0 0 14px", fontWeight: 600 }}>Mein Lernplaner</h1>
 
           <AuthBar cloud={cloud} />
 
@@ -394,7 +445,7 @@ export default function LernfortschrittTracker() {
                       <div style={{ margin: "2px 0 6px 10px", padding: "10px 12px", borderRadius: 8, background: "#FAFAF6", border: "1px solid #EDEBE3" }}>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 14px", fontSize: 12, color: "#6B6459", marginBottom: 9 }}>
                           <span><b style={{ color: "#3A382F", fontWeight: 600 }}>Fach:</b> {meta.label}</span>
-                          <span><b style={{ color: "#3A382F", fontWeight: 600 }}>Tag:</b> {DAY_DATE[ex.dayId] || "—"}</span>
+                          <span><b style={{ color: "#3A382F", fontWeight: 600 }}>Tag:</b> {dayDateLabel[ex.dayId] || "—"}</span>
                           <span><b style={{ color: "#3A382F", fontWeight: 600 }}>Uhrzeit:</b> {ex.time || "—"}</span>
                           <span><b style={{ color: "#3A382F", fontWeight: 600 }}>Raum:</b> {ex.room || "—"}</span>
                         </div>
@@ -418,6 +469,7 @@ export default function LernfortschrittTracker() {
             {openExamForm && (
               <ExamForm
                 initial={openExamForm.exam}
+                days={allDays}
                 onCancel={() => setOpenExamForm(null)}
                 onSave={(data) => saveExam(openExamForm.exam ? openExamForm.exam.id : null, data)}
               />
@@ -549,7 +601,7 @@ export default function LernfortschrittTracker() {
           )}
           {visibleDays.length === 0 && (
             <div style={{ background: "#fff", borderRadius: 12, padding: "18px 16px", textAlign: "center", fontSize: 13, color: "#948C7C", fontFamily: "ui-sans-serif, system-ui", boxShadow: "0 1px 2px rgba(27,27,24,0.06)" }}>
-              {openSubject ? "Keine kommenden Tage für dieses Fach." : "Keine kommenden Tage — die Klausurenphase ist vorbei."}
+              {openSubject ? "Keine kommenden Tage für dieses Fach." : "Keine kommenden Tage geplant."}
             </div>
           )}
           {visibleDays.map((day) => {
@@ -563,7 +615,12 @@ export default function LernfortschrittTracker() {
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                   <span style={{ fontWeight: 600, fontSize: 15 }}>{day.date}</span>
-                  <span style={{ fontSize: 11, color: "#948C7C", fontFamily: "ui-sans-serif, system-ui" }}>{day.phase}</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 11, color: "#948C7C", fontFamily: "ui-sans-serif, system-ui" }}>{day.phase}</span>
+                    {day.custom && (
+                      <button onClick={() => deleteCustomDay(day.id)} title="Tag löschen" style={iconBtnSm}><Trash2 size={13} color="#B5442E" /></button>
+                    )}
+                  </span>
                 </div>
 
                 {exam && (
@@ -609,6 +666,20 @@ export default function LernfortschrittTracker() {
               </div>
             );
           })}
+
+          {openNewDayForm ? (
+            <NewDayForm onCancel={() => setOpenNewDayForm(false)} onSave={addCustomDay} />
+          ) : (
+            <button onClick={() => setOpenNewDayForm(true)}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "12px 8px",
+                fontSize: 13, color: "#2C6E63", background: "#fff", border: "1px dashed #2C6E6355",
+                borderRadius: 12, cursor: "pointer", fontFamily: "ui-sans-serif, system-ui", fontWeight: 600,
+                boxShadow: "0 1px 2px rgba(27,27,24,0.06)"
+              }}>
+              <Plus size={15} /> Neuen Tag hinzufügen
+            </button>
+          )}
         </div>
 
         <p style={{ marginTop: 24, fontSize: 12, color: "#948C7C", fontFamily: "ui-sans-serif, system-ui", textAlign: "center" }}>
@@ -735,9 +806,9 @@ const inputStyle = {
   fontFamily: "ui-sans-serif, system-ui", outline: "none", flex: 1, minWidth: 130
 };
 
-function ExamForm({ initial, onSave, onCancel }) {
+function ExamForm({ initial, days, onSave, onCancel }) {
   const [subject, setSubject] = useState(initial?.subject || "RW");
-  const [dayId, setDayId] = useState(initial?.dayId || PLAN[0].id);
+  const [dayId, setDayId] = useState(initial?.dayId || days[0]?.id);
   const [time, setTime] = useState(initial?.time || "");
   const [room, setRoom] = useState(initial?.room || "");
 
@@ -755,7 +826,7 @@ function ExamForm({ initial, onSave, onCancel }) {
           ))}
         </select>
         <select value={dayId} onChange={(e) => setDayId(e.target.value)} style={selectStyle}>
-          {PLAN.map((d) => (
+          {days.map((d) => (
             <option key={d.id} value={d.id}>{d.date}</option>
           ))}
         </select>
@@ -770,6 +841,36 @@ function ExamForm({ initial, onSave, onCancel }) {
         </button>
         <button onClick={submit} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "#fff", background: "#2C6E63", border: "none", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontFamily: "ui-sans-serif, system-ui", fontWeight: 600 }}>
           <Check size={14} /> {initial ? "Speichern" : "Hinzufügen"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NewDayForm({ onSave, onCancel }) {
+  const [iso, setIso] = useState(todayISO());
+  const [phase, setPhase] = useState("");
+
+  const submit = () => { if (iso) onSave(iso, phase); };
+
+  return (
+    <div style={{
+      padding: 12, borderRadius: 12, background: "#fff", border: "1px dashed #2C6E6355",
+      display: "flex", flexDirection: "column", gap: 8, fontFamily: "ui-sans-serif, system-ui",
+      boxShadow: "0 1px 2px rgba(27,27,24,0.06)"
+    }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input type="date" value={iso} onChange={(e) => setIso(e.target.value)} style={{ ...inputStyle, flex: "1 1 160px" }} />
+        <input value={phase} onChange={(e) => setPhase(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") onCancel(); }}
+          placeholder="Phase/Label (optional, z.B. Klausurwoche 3)" style={{ ...inputStyle, flex: "2 1 220px" }} />
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button onClick={onCancel} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "#6B6459", background: "none", border: "1px solid #D5D0C3", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontFamily: "ui-sans-serif, system-ui" }}>
+          <X size={14} /> Abbrechen
+        </button>
+        <button onClick={submit} disabled={!iso} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "#fff", background: iso ? "#2C6E63" : "#A9B8B2", border: "none", borderRadius: 8, padding: "6px 12px", cursor: iso ? "pointer" : "default", fontFamily: "ui-sans-serif, system-ui", fontWeight: 600 }}>
+          <Check size={14} /> Hinzufügen
         </button>
       </div>
     </div>
