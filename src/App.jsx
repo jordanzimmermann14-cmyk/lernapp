@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Circle, Flame, Rotate3d, Truck, Calculator, TrainFront, Boxes, Code2, MapPin, CalendarDays, Plus, Pencil, Trash2, X, Check, ChevronDown, Cloud, CloudOff, Copy } from "lucide-react";
+import { CheckCircle2, Circle, Flame, Rotate3d, Truck, Calculator, TrainFront, Boxes, Code2, MapPin, CalendarDays, Plus, Pencil, Trash2, X, Check, ChevronDown, Cloud, CloudOff } from "lucide-react";
 import { useCloudSync } from "./cloudSync";
 
 const SUBJECT_META = {
@@ -817,73 +817,18 @@ function TopicForm({ initial, onSave, onCancel }) {
   );
 }
 
-const linkBtn = {
-  fontSize: 12, color: "#2C6E63", fontWeight: 600, background: "none", border: "none",
-  cursor: "pointer", fontFamily: "ui-sans-serif, system-ui", textDecoration: "underline", padding: 0
-};
-
 function AuthBar({ cloud }) {
-  const [open, setOpen] = useState(false);
-  const [input, setInput] = useState("");
-  const [err, setErr] = useState("");
-  const [copied, setCopied] = useState(false);
-
   // Solange Sync nicht konfiguriert ist, bleibt die Leiste unsichtbar (App läuft lokal).
   if (!cloud.configured) return null;
 
-  const wrap = { marginBottom: 14, fontFamily: "ui-sans-serif, system-ui" };
   const syncing = cloud.syncStatus === "saving";
   const error = cloud.syncStatus === "error";
   const color = error ? "#B5442E" : "#2C6E63";
 
-  const copyCode = async () => {
-    try {
-      await navigator.clipboard.writeText(cloud.code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch (e) { /* Zwischenablage nicht verfügbar */ }
-  };
-
-  const submit = () => {
-    const { error: joinErr } = cloud.joinCode(input);
-    if (joinErr) { setErr(joinErr.message); return; }
-    setErr("");
-    setInput("");
-    setOpen(false);
-  };
-
   return (
-    <div style={wrap}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#6B6459", flexWrap: "wrap" }}>
-        {error ? <CloudOff size={14} color={color} /> : <Cloud size={14} color={color} />}
-        <span style={{ color, fontWeight: 600 }}>{error ? "Sync-Fehler" : syncing ? "synchronisiert…" : "synchronisiert"}</span>
-        {cloud.code && (
-          <button onClick={copyCode} title="Sync-Code kopieren"
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "#3A382F", background: "#FAFAF6", border: "1px solid #E4E1D6", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontFamily: "ui-sans-serif, system-ui", fontVariantNumeric: "tabular-nums" }}>
-            {copied ? <Check size={12} color="#2C6E63" /> : <Copy size={12} />} {cloud.code}
-          </button>
-        )}
-        <button onClick={() => setOpen(!open)} style={{ marginLeft: "auto", ...linkBtn }}>
-          {open ? "Abbrechen" : "Anderes Gerät verbinden"}
-        </button>
-      </div>
-      {!open && (
-        <div style={{ fontSize: 11.5, color: "#948C7C", marginTop: 3 }}>
-          Trag diesen Code auf einem anderen Gerät ein, um deinen Fortschritt zu übernehmen.
-        </div>
-      )}
-      {open && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-          <input value={input} onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setOpen(false); }}
-            placeholder="Code vom anderen Gerät, z.B. A3F9-K7QX" autoFocus
-            style={{ flex: 1, minWidth: 200, fontSize: 13, padding: "7px 10px", borderRadius: 8, border: "1px solid #D5D0C3", fontFamily: "ui-sans-serif, system-ui", outline: "none" }} />
-          <button onClick={submit} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, color: "#fff", background: "#2C6E63", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontFamily: "ui-sans-serif, system-ui" }}>
-            Verbinden
-          </button>
-          {err && <div style={{ width: "100%", fontSize: 11.5, color: "#B5442E" }}>{err}</div>}
-        </div>
-      )}
+    <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#948C7C", fontFamily: "ui-sans-serif, system-ui" }}>
+      {error ? <CloudOff size={13} color={color} /> : <Cloud size={13} color={color} />}
+      <span style={{ color: error ? color : "#948C7C" }}>{error ? "Sync-Fehler" : syncing ? "synchronisiert…" : "synchronisiert"}</span>
     </div>
   );
 }
